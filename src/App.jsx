@@ -1,43 +1,56 @@
 import { useState } from 'react';
 import { Marked } from 'marked';
-import { loadStripe } from '@stripe/stripe-js';
-import axios from 'axios';
+import qrisImage from './assets/qris.jpg'; // Taruh gambar QRIS di src/assets
 
 const marked = new Marked();
-const stripePromise = loadStripe(import.meta.env.VITE_STRIPE_PUBLISHABLE_KEY);
 
 function App() {
   const [idea, setIdea] = useState('');
   const [report, setReport] = useState('');
   const [loading, setLoading] = useState(false);
+  const [paid, setPaid] = useState(false); // Ganti jadi true setelah verifikasi payment
+  const [proof, setProof] = useState(''); // Optional: input referensi/no transaksi
 
   const generateReport = async (full = false) => {
+    if (full && !paid) {
+      alert('Bayar dulu Rp25.000 via QRIS, lalu konfirmasi!');
+      return;
+    }
+
     setLoading(true);
     setReport('');
     try {
-      const response = await axios.post('https://api.openai.com/v1/chat/completions', {
-        model: full ? 'gpt-4o' : 'gpt-4o-mini',
-        messages: [{ role: 'user', content: full 
-          ? `Analisis mendalam ide bisnis Indonesia: "${idea}". Buat laporan lengkap dalam bahasa Indonesia: Overview, SWOT, kompetitor lokal (Shopee, Tokopedia, Gojek), strategi TikTok/Instagram, peluang UMKM, panduan dana dari investor/KemenUMKM. Format Markdown.` 
-          : `Ringkasan singkat validasi ide bisnis Indonesia: "${idea}". Berikan overview, peluang, risiko. Bahasa Indonesia.` 
-        }],
-        max_tokens: full ? 4000 : 500,
-      }, {
-        headers: { Authorization: `Bearer ${import.meta.env.VITE_OPENAI_API_KEY}` }
+      // Call OpenAI client-side (hati-hati expose key—nanti proxy kalau live)
+      const response = await fetch('https://api.openai.com/v1/chat/completions', {
+        method: 'POST',
+        headers: {
+          'Authorization': `Bearer ${import.meta.env.VITE_OPENAI_API_KEY}`,
+          'Content-Type': 'application/json'
+        },
+        body: JSON.stringify({
+          model: full ? 'gpt-4o' : 'gpt-4o-mini',
+          messages: [{ role: 'user', content: full 
+            ? `Analisis mendalam ide bisnis Indonesia: "${idea}". Laporan lengkap bahasa Indonesia: Overview, SWOT, kompetitor (Shopee, Tokopedia, Gojek), strategi TikTok/Instagram, peluang UMKM, panduan dana KemenUMKM/BPS. Format Markdown detail 200+ halaman konsep.`
+            : `Ringkasan validasi ide bisnis Indonesia: "${idea}". Overview, peluang, risiko. Bahasa Indonesia.`
+          }],
+          max_tokens: full ? 4000 : 500,
+        })
       });
-      setReport(response.data.choices[0].message.content);
+      const data = await response.json();
+      setReport(data.choices[0].message.content);
     } catch (err) {
-      setReport('Error: Gagal generate report. Cek console.');
+      setReport('Error: Gagal generate. Cek API key OpenAI.');
       console.error(err);
     }
     setLoading(false);
   };
 
-  const checkoutFull = async () => {
-    const stripe = await stripePromise;
-    const { data } = await axios.post('/.netlify/functions/create-checkout', { idea }); // Nanti buat function ini kalau deploy Netlify, atau ganti ke backend lain
-    // Sementara pakai Stripe langsung (butuh backend untuk security)
-    // Alternatif cepat: Redirect ke pre-made Stripe link, atau setup proxy
+  const handlePaymentConfirm = () => {
+    // Manual confirm: Cek proof/referensi di dashboard bankmu, lalu setPaid(true) atau tambah form admin sederhana
+    if (proof) {
+      alert('Terima kasih! Kami cek pembayaran secepatnya (manual). Report full akan aktif setelah confirm.');
+      setPaid(true); // Untuk test, langsung true. Live: Kirim email ke kamu atau pakai form.
+    }
   };
 
   return (
@@ -49,7 +62,7 @@ function App() {
         <textarea
           value={idea}
           onChange={(e) => setIdea(e.target.value)}
-          placeholder="Deskripsikan ide bisnismu, misal: 'Toko online batik modern via TikTok Shop'"
+          placeholder="Deskripsikan ide bisnismu, misal: 'Warung kopi online delivery via Gojek'"
           className="w-full p-4 border-2 border-blue-300 rounded-lg mb-6 text-lg"
           rows={6}
         />
@@ -58,10 +71,27 @@ function App() {
           <button onClick={() => generateReport(false)} disabled={loading || !idea} className="bg-green-600 text-white px-8 py-4 rounded-lg text-xl font-semibold hover:bg-green-700">
             {loading ? 'Generating...' : 'Teaser Gratis'}
           </button>
-          <button onClick={() => generateReport(true)} disabled={loading || !idea} className="bg-blue-700 text-white px-8 py-4 rounded-lg text-xl font-semibold hover:bg-blue-800">
-            Full Report (Test Mode)
+          <button onClick={() => generateReport(true)} disabled={loading || !idea || !paid} className="bg-blue-700 text-white px-8 py-4 rounded-lg text-xl font-semibold hover:bg-blue-800">
+            Full Report (Rp25.000)
           </button>
         </div>
+
+        {!paid && idea && (
+          <div className="bg-white p-8 rounded-xl shadow-lg text-center mb-8">
+            <h2 className="text-2xl font-bold mb-4">Bayar Rp25.000 untuk Full Report</h2>
+            <img src={qrisImage} alt="QRIS Payment" className="mx-auto w-64 h-64 mb-4" />
+            <p className="mb-4">Scan QRIS di atas dengan app e-wallet/banking mu (DANA, OVO, GoPay, dll)</p>
+            <input 
+              type="text" 
+              placeholder="Masukkan nomor referensi/transaksi (optional)" 
+              value={proof} 
+              onChange={(e) => setProof(e.target.value)} 
+              className="w-full p-4 border mb-4"
+            />
+            <button onClick={handlePaymentConfirm} className="bg-green-600 text-white px-8 py-4 rounded-lg">Konfirmasi Pembayaran</button>
+            <p className="text-sm mt-4 text-gray-600">Kami cek manual & aktifkan full report dalam 5-10 menit.</p>
+          </div>
+        )}
 
         {report && (
           <div className="bg-white p-8 rounded-xl shadow-lg">
