@@ -1,73 +1,75 @@
-import React, { useEffect, useState } from 'react';
-import { Routes, Route, Navigate } from 'react-router-dom';
-import { Helmet } from 'react-helmet';
-import { auth } from '@/lib/firebase';
-import { onAuthStateChanged } from 'firebase/auth';
-import LandingPage from '@/pages/LandingPage';
-import LoginPage from '@/pages/LoginPage';
-import RegisterPage from '@/pages/RegisterPage';
-import DashboardPage from '@/pages/DashboardPage';
-import IdeaFormPage from '@/pages/IdeaFormPage';
-import ReportPage from '@/pages/ReportPage';
-import PaymentPage from '@/pages/PaymentPage';
-import ProductPage from '@/pages/ProductPage';
+import { useState } from 'react';
+import { Marked } from 'marked';
+import { loadStripe } from '@stripe/stripe-js';
+import axios from 'axios';
+
+const marked = new Marked();
+const stripePromise = loadStripe(import.meta.env.VITE_STRIPE_PUBLISHABLE_KEY);
 
 function App() {
-  const [user, setUser] = useState(null);
-  const [loading, setLoading] = useState(true);
+  const [idea, setIdea] = useState('');
+  const [report, setReport] = useState('');
+  const [loading, setLoading] = useState(false);
 
-  useEffect(() => {
-    const unsubscribe = onAuthStateChanged(auth, (currentUser) => {
-      setUser(currentUser);
-      setLoading(false);
-    });
+  const generateReport = async (full = false) => {
+    setLoading(true);
+    setReport('');
+    try {
+      const response = await axios.post('https://api.openai.com/v1/chat/completions', {
+        model: full ? 'gpt-4o' : 'gpt-4o-mini',
+        messages: [{ role: 'user', content: full 
+          ? `Analisis mendalam ide bisnis Indonesia: "${idea}". Buat laporan lengkap dalam bahasa Indonesia: Overview, SWOT, kompetitor lokal (Shopee, Tokopedia, Gojek), strategi TikTok/Instagram, peluang UMKM, panduan dana dari investor/KemenUMKM. Format Markdown.` 
+          : `Ringkasan singkat validasi ide bisnis Indonesia: "${idea}". Berikan overview, peluang, risiko. Bahasa Indonesia.` 
+        }],
+        max_tokens: full ? 4000 : 500,
+      }, {
+        headers: { Authorization: `Bearer ${import.meta.env.VITE_OPENAI_API_KEY}` }
+      });
+      setReport(response.data.choices[0].message.content);
+    } catch (err) {
+      setReport('Error: Gagal generate report. Cek console.');
+      console.error(err);
+    }
+    setLoading(false);
+  };
 
-    return () => unsubscribe();
-  }, []);
-
-  if (loading) {
-    return (
-      <div className="min-h-screen flex items-center justify-center bg-gray-50">
-        <div className="animate-spin rounded-full h-12 w-12 border-b-2 border-indigo-600"></div>
-      </div>
-    );
-  }
+  const checkoutFull = async () => {
+    const stripe = await stripePromise;
+    const { data } = await axios.post('/.netlify/functions/create-checkout', { idea }); // Nanti buat function ini kalau deploy Netlify, atau ganti ke backend lain
+    // Sementara pakai Stripe langsung (butuh backend untuk security)
+    // Alternatif cepat: Redirect ke pre-made Stripe link, atau setup proxy
+  };
 
   return (
-    <>
-      <Helmet>
-        <title>IdeBisnisAI - Validasi Ide Bisnis dengan AI</title>
-        <meta name="description" content="Platform AI untuk validasi ide bisnis di Indonesia. Dapatkan analisis SWOT, riset kompetitor, dan strategi scaling dengan teknologi AI." />
-      </Helmet>
-      <Routes>
-        <Route path="/" element={<LandingPage />} />
-        <Route path="/product" element={<ProductPage />} />
-        <Route 
-          path="/login" 
-          element={user ? <Navigate to="/dashboard" /> : <LoginPage />} 
+    <div className="min-h-screen bg-gradient-to-br from-blue-50 to-red-50 p-8 font-sans">
+      <div className="max-w-4xl mx-auto">
+        <h1 className="text-5xl font-bold text-center text-blue-800 mb-4">IdeBisnis.ai</h1>
+        <p className="text-center text-xl mb-8">Validasi Ide Bisnismu untuk Pasar Indonesia dalam Detik!</p>
+        
+        <textarea
+          value={idea}
+          onChange={(e) => setIdea(e.target.value)}
+          placeholder="Deskripsikan ide bisnismu, misal: 'Toko online batik modern via TikTok Shop'"
+          className="w-full p-4 border-2 border-blue-300 rounded-lg mb-6 text-lg"
+          rows={6}
         />
-        <Route 
-          path="/register" 
-          element={user ? <Navigate to="/dashboard" /> : <RegisterPage />} 
-        />
-        <Route 
-          path="/dashboard" 
-          element={user ? <DashboardPage /> : <Navigate to="/login" />} 
-        />
-        <Route 
-          path="/new-idea" 
-          element={user ? <IdeaFormPage /> : <Navigate to="/login" />} 
-        />
-        <Route 
-          path="/report/:id" 
-          element={user ? <ReportPage /> : <Navigate to="/login" />} 
-        />
-        <Route 
-          path="/payment/:id" 
-          element={user ? <PaymentPage /> : <Navigate to="/login" />} 
-        />
-      </Routes>
-    </>
+
+        <div className="flex gap-4 justify-center mb-8">
+          <button onClick={() => generateReport(false)} disabled={loading || !idea} className="bg-green-600 text-white px-8 py-4 rounded-lg text-xl font-semibold hover:bg-green-700">
+            {loading ? 'Generating...' : 'Teaser Gratis'}
+          </button>
+          <button onClick={() => generateReport(true)} disabled={loading || !idea} className="bg-blue-700 text-white px-8 py-4 rounded-lg text-xl font-semibold hover:bg-blue-800">
+            Full Report (Test Mode)
+          </button>
+        </div>
+
+        {report && (
+          <div className="bg-white p-8 rounded-xl shadow-lg">
+            <div dangerouslySetInnerHTML={{ __html: marked.parse(report) }} className="prose max-w-none" />
+          </div>
+        )}
+      </div>
+    </div>
   );
 }
 
